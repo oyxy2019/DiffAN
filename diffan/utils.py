@@ -197,7 +197,8 @@ class MyPlotGraphDAG(object):
             map2 = ax2.imshow(true_dag, cmap='Greys', interpolation='none')
             fig.colorbar(map2, ax=ax2)
 
-            ax1.text(0.1, 0.7, f"iter: {iters}")
+            if iters >= 0:
+                ax1.text(0.1, 0.7, f"from iter {iters} to {iters+1}")
 
             if save_name is not None:
                 fig.savefig(save_name)

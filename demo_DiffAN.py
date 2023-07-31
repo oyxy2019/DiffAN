@@ -6,39 +6,70 @@ from diffan.utils import num_errors, dataset_transform, MyPlotGraphDAG
 from cdt.metrics import SID
 import os
 
-os.environ["CUDA_VISIBLE_DEVICES"] = "0"
-np.set_printoptions(precision=3)
+os.environ["CUDA_VISIBLE_DEVICES"] = "0"    # 改成自己的GPU编号
+np.set_printoptions(precision=3)    # 设置numpy小数点精度
 
 
 def main():
-    # # data simulation, simulate true causal dag and train_data.
-    # n_nodes = 10
+    # data simulation, simulate true causal dag and train_data.
+    # n_nodes = 18
     # num_samples = 1000
     # print(f"Creating dataset")
     # weighted_random_dag = DAG.erdos_renyi(n_nodes=n_nodes, n_edges=4*n_nodes, seed=3)
     # dataset = IIDSimulation(W=weighted_random_dag, n=num_samples, method='nonlinear', sem_type='gp')
     # true_causal_matrix, X = dataset.B, dataset.X
 
+
     true_causal_matrix, X, n_nodes = dataset_transform("datasets/18V_55N_Wireless")
+    X = X.astype(float)
+    print(X.shape)
+    print(X[:10])
 
     print(f"Run Causal Discovery with Deciduous Residue")
-    diffan = DiffAN(n_nodes, residue=True)
+    diffan = DiffAN(n_nodes, residue=True, batch_size=512)
     adj_matrix, order = diffan.fit(X)
     print(f"DiffANM Num errors {num_errors(order, true_causal_matrix)}")
     mt = MetricsDAG(adj_matrix, true_causal_matrix).metrics
     mt["sid"] = SID(true_causal_matrix, adj_matrix).item()
     print(mt)
-    MyPlotGraphDAG(1, adj_matrix, true_causal_matrix)
+    MyPlotGraphDAG(-1, adj_matrix, true_causal_matrix)
 
     print(f"Run Causal Discovery without Deciduous Residue / Masking only")
-    diffan = DiffAN(n_nodes, residue=False)
+    diffan = DiffAN(n_nodes, residue=False, batch_size=512)
     adj_matrix, order = diffan.fit(X)
     print(f"DiffANM Num errors {num_errors(order, true_causal_matrix)}")
     mt = MetricsDAG(adj_matrix, true_causal_matrix).metrics
     mt["sid"] = SID(true_causal_matrix, adj_matrix).item()
     print(mt)
-    MyPlotGraphDAG(2, adj_matrix, true_causal_matrix)
+    MyPlotGraphDAG(-1, adj_matrix, true_causal_matrix)
 
 
 if __name__ == "__main__":
     main()
+
+
+"""
+报错记录
+1.numpy版本问题，需要大于1.20.0、小于1.23.0
+2.报错：
+========================================================================================================================
+torch.cuda.OutOfMemoryError: CUDA out of memory. Tried to allocate 1.20 GiB (GPU 0; 8.00 GiB total capacity; 6.79 GiB already allocated; 0 bytes free; 6.99 GiB reserved in total by PyTorch) If reserved memory is >> allocated memory try setting max_split_size_mb to avoid fragmentation.  See documentation for Memory Management and PYTORCH_CUDA_ALLOC_CONF
+========================================================================================================================
+解决方法：batch_size=1024->256
+3.报错：
+========================================================================================================================
+Loading required package: nlme
+This is mgcv 1.9-0. For overview type 'help("mgcv-package")'.
+There was some error with gam. The smoothing parameter is set to zero.
+Error in smooth.construct.tp.smooth.spec(object, dk$data, dk$knots) : 
+  A term has fewer unique covariate combinations than specified maximum degrees of freedom
+Calls: pruning ... smooth.construct -> smooth.construct.tp.smooth.spec
+Execution halted
+
+R Python Error Output 
+========================================================================================================================
+
+
+
+
+"""
