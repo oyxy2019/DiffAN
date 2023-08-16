@@ -57,6 +57,10 @@ def get_value_from_str(exp_name: str, variable: str, type_func=str):
 
 
 # 加的 数据预处理
+np.set_printoptions(threshold=np.inf)
+pd.set_option('display.width', None)
+
+
 def dataset_transform(data_path=r"/home/newsgrid/linyy/gflowcausal/datasets/25V_474N_Microwave"):
     '''
     将华为比赛数据集转为标准因果数据集
@@ -76,17 +80,18 @@ def dataset_transform(data_path=r"/home/newsgrid/linyy/gflowcausal/datasets/25V_
     # topo_matrix = np.load(topo_path)
     # topo_matrix[:, :] = 0  # 暂不考虑设备拓扑
     print(f"Load data done, columns: {alarm_data.columns.values}, shape: {alarm_data.shape}")
-    # print(alarm_data[:10])
+    print(alarm_data[:10])
 
     # 得到事件类型及总数
     event_ids = sorted(alarm_data["alarm_id"].unique())
     num_events = len(event_ids)
     print("event_ids:", event_ids, "num_events:", num_events)
 
-    # alarm_id onehot
+    # 将alarm_id的数值变为onehot向量，例如11->[0 0 0 0 0 0 0 0 0 0 0 1 0 0 0 0 0 0]
     alarm_onehot_df = pd.get_dummies(alarm_data["alarm_id"], prefix="e", columns=["alarm_id"])
-    print(f"alarm_onehot_df, columns: {alarm_onehot_df.columns.values}")
-    # print(alarm_onehot_df[:10])
+    data_onehot = alarm_onehot_df.values
+    # print(data_onehot.shape)
+    # print(data_onehot[:20])
 
     # check corr 查看相关性系数
     # print(alarm_onehot_df.corr())
@@ -94,22 +99,18 @@ def dataset_transform(data_path=r"/home/newsgrid/linyy/gflowcausal/datasets/25V_
     # 滑动窗口
     win_size = true_causal_matrix.shape[0] - 1
     print("win_size: ", win_size)
-    delta_index = win_size
-    data_onehot = alarm_onehot_df.values
-    # print(data_onehot.shape)
-    # print(data_onehot[:10])
 
-    # apply sliding window
-    data_view = np.lib.stride_tricks.sliding_window_view(data_onehot, delta_index, axis=0)
-    # print("data_view[0]:")
+    # apply sliding window, 得到的data_view是一个一个窗口的切片，但是转置的
+    data_view = np.lib.stride_tricks.sliding_window_view(data_onehot, win_size, axis=0)
+    # print("data_view:")
     # print(data_view.shape)
-    # print(data_view[0])
+    # print(data_view[:5])
 
     # sum over the sliding window
     data_final = np.sum(data_view[:, :, 1:], axis=-1)
-    print("data_final[:10]:")
-    print(data_final.shape)
-    print(data_final[:10])
+    # print("data_final[:10]:")
+    # print(data_final.shape)
+    # print(data_final[:10])
 
     X = data_final
 
@@ -118,6 +119,7 @@ def dataset_transform(data_path=r"/home/newsgrid/linyy/gflowcausal/datasets/25V_
 
 import numpy as np
 import matplotlib.pyplot as plt
+import networkx as nx
 
 
 # 加的，可视化因果图
@@ -198,9 +200,32 @@ class MyPlotGraphDAG(object):
             fig.colorbar(map2, ax=ax2)
 
             if iters >= 0:
-                ax1.text(0.1, 0.7, f"from iter {iters} to {iters+1}")
+                ax1.text(0.1, 0.7, f"from iter {iters} to {iters + 1}")
 
             if save_name is not None:
                 fig.savefig(save_name)
             if show:
                 plt.show()
+
+
+
+def visualize_dag(adj_matrix):
+    # 创建一个有向图对象
+    G = nx.DiGraph()
+
+    num_nodes = len(adj_matrix)
+    for i in range(num_nodes):
+        G.add_node(i)
+
+    for i in range(num_nodes):
+        for j in range(num_nodes):
+            if adj_matrix[i][j] == 1:
+                G.add_edge(i, j)
+
+    # 绘制图形
+    pos = nx.spring_layout(G, k=2)  # 使用Spring布局算法
+    plt.figure(figsize=(12, 12))  # 创建一个新的图形
+    nx.draw_networkx(G, pos, with_labels=True, node_size=1000, node_color='skyblue', font_size=10, font_color='black',
+                     arrows=True)
+    plt.title("Directed Acyclic Graph (DAG)")
+    plt.show()
