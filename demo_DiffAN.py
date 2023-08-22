@@ -32,7 +32,7 @@ def main():
     mt = MetricsDAG(adj_matrix, true_causal_matrix).metrics
     mt["sid"] = SID(true_causal_matrix, adj_matrix).item()
     print(mt)
-    MyPlotGraphDAG(-1, adj_matrix, true_causal_matrix)
+    MyPlotGraphDAG(adj_matrix, true_causal_matrix)
     print(f"order: {order}")
 
     print(f"Run Causal Discovery without Deciduous Residue / Masking only")
@@ -42,7 +42,7 @@ def main():
     mt = MetricsDAG(adj_matrix, true_causal_matrix).metrics
     mt["sid"] = SID(true_causal_matrix, adj_matrix).item()
     print(mt)
-    MyPlotGraphDAG(-1, adj_matrix, true_causal_matrix)
+    MyPlotGraphDAG(adj_matrix, true_causal_matrix)
     print(f"order: {order}")
 
 
@@ -72,7 +72,7 @@ Execution halted
 
 R Python Error Output 
 ------------------------------------------------------------------------------------------------------------------------
-解决方法：暂时先不使用CAM剪枝算法
+解决方法：暂时先不使用CAM剪枝算法，修改了diffan.py的line:62
 
 
 """

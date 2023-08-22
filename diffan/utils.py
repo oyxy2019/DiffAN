@@ -139,9 +139,9 @@ class MyPlotGraphDAG(object):
         The file name of the image to be saved.
     '''
 
-    def __init__(self, iters, est_dag, true_dag=None, show=True, save_name=None):
+    def __init__(self, est_dag, true_dag=None, info="", show=True, save_name=None):
 
-        self.iters = iters
+        self.info = info
         # self.est_dag = est_dag.copy()
         self.est_dag = est_dag
         self.true_dag = true_dag
@@ -158,10 +158,10 @@ class MyPlotGraphDAG(object):
             raise ValueError('Neither display nor save the picture! ' + \
                              'Please modify the parameter show or save_name.')
 
-        MyPlotGraphDAG._plot_dag(self.iters, self.est_dag, self.true_dag, self.show, self.save_name)
+        MyPlotGraphDAG._plot_dag(self.info, self.est_dag, self.true_dag, self.show, self.save_name)
 
     @staticmethod
-    def _plot_dag(iters, est_dag, true_dag, show=True, save_name=None):
+    def _plot_dag(info, est_dag, true_dag, show=True, save_name=None):
         """
         Plot the estimated DAG and the true DAG.
 
@@ -199,8 +199,7 @@ class MyPlotGraphDAG(object):
             map2 = ax2.imshow(true_dag, cmap='Greys', interpolation='none')
             fig.colorbar(map2, ax=ax2)
 
-            if iters >= 0:
-                ax1.text(0.1, 0.7, f"from iter {iters} to {iters + 1}")
+            ax1.text(-8, -3, info)
 
             if save_name is not None:
                 fig.savefig(save_name)
