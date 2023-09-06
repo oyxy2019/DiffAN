@@ -18,7 +18,7 @@ ori_npy = threshold(ori_npy, 0.25)
 mt = MetricsDAG(ori_npy, true_causal_matrix).metrics
 mt["sid"] = SID(true_causal_matrix, ori_npy).item()
 print(mt)
-# MyPlotGraphDAG(ori_npy, true_causal_matrix)
+MyPlotGraphDAG(ori_npy, true_causal_matrix)
 
 
 

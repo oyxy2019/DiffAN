@@ -16,7 +16,7 @@ from diffan.utils import full_DAG
 
 class DiffAN():
     def __init__(self, n_nodes, masking = True, residue= True, 
-                epochs: int = int(3e3), batch_size : int = 1024, learning_rate : float = 0.001):
+                epochs: int = int(3e3), batch_size : int = 1024, learning_rate : float = 0.001, DatasetName = None):
         self.n_nodes = n_nodes
         assert self.n_nodes > 1, "Not enough nodes, make sure the dataset contain at least 2 variables (columns)."
         self.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
@@ -47,13 +47,16 @@ class DiffAN():
         self.masking = masking
         self.residue = residue
         self.sorting = (not masking) and (not residue)
+
         ## Pruning
         self.cutoff = 0.001
-    
-    def fit(self, X):
+
+        self.DatasetName = DatasetName
+
+    def fit(self, X, use_savemodel=None):
         # X = (X - X.mean(0, keepdims = True)) / X.std(0, keepdims = True)    # 标准化处理
         X = torch.FloatTensor(X).to(self.device)
-        self.train_score(X)
+        self.train_score(X, use_savemodel=use_savemodel)
         order = self.topological_ordering(X)
         out_dag = self.pruning(order, X.detach().cpu().numpy())
         return out_dag, order
@@ -62,13 +65,20 @@ class DiffAN():
         return full_DAG(order)
         # return cam_pruning(full_DAG(order), X, self.cutoff)
     
-    def train_score(self, X, fixed = None):
+    def train_score(self, X, fixed=None, use_savemodel=None):
         if fixed is not None:
             self.epochs = fixed
         best_model_state_epoch = 300
         self.model.train()  # self.model: 一个神经网络模型，用来预测给定噪声图像和时间步的噪声分布
         n_samples = X.shape[0]
         self.batch_size = min(n_samples, self.batch_size)
+
+        # 加载跑过的模型，节约运行时间
+        if(use_savemodel is not None):
+            print(f"using_savemodel:{use_savemodel}")
+            self.model.load_state_dict(torch.load(f'./save_model/{use_savemodel}'))
+            return
+
         val_ratio = 0.2    # 表示验证集占总数据集的比例
         val_size = int(n_samples * val_ratio)
         train_size = n_samples - val_size   # 表示训练集的大小
@@ -120,7 +130,7 @@ class DiffAN():
             print(f"Best model at epoch {best_model_state_epoch} with loss {self.best_loss}")
             self.model.load_state_dict(best_model_state)
             # 保存模型
-            torch.save(self.model.state_dict(), f'./save_model/model_state_dict_epoch{epoch}.pth')
+            torch.save(self.model.state_dict(), f'./save_model/{self.DatasetName}_best_model_sd_epoch{best_model_state_epoch}.pth')
 
     # 对一个有向无环图（DAG）进行拓扑排序
     def topological_ordering(self, X, step = None, eval_batch_size = None):
@@ -139,7 +149,8 @@ class DiffAN():
         steps_list = [step] if step is not None else range(0, self.n_steps+1, self.n_steps//self.n_votes)   # 表示用来计算雅可比矩阵的时间步列表
         if self.sorting:
             steps_list = [self.n_steps//2]
-        pbar = tqdm(range(self.n_nodes-1), desc = "Nodes ordered ")
+        pbar = tqdm(range(self.n_nodes-1), desc="Nodes ordered ")
+        pbar = tqdm(range(self.n_nodes - 1), desc="Nodes ordered ", disable=True)
         leaf = None
         for jac_step in pbar:   # 使用一个循环来进行排序
             leaves = []
@@ -154,11 +165,19 @@ class DiffAN():
                     return order
                 leaves.append(leaf_)    # 将叶子节点加入到一个列表leaves中
 
-            leaf = Counter(leaves).most_common(1)[0][0] # 从列表leaves中找出出现次数最多的叶子节点
+            leaves_count = []
+            for leave in leaves:
+                leaves_count.append(active_nodes[leave])
+            print("出现次数global_leaves: ", leaves_count)
+
+
+            leaf = Counter(leaves).most_common(1)[0][0]  # 从列表leaves中找出出现次数最多的叶子节点
             leaf_global = active_nodes[leaf]    # 将其对应的全局节点编号赋值给变量leaf_global
             order.append(leaf_global)   # 将变量leaf_global加入到拓扑序列order中
             active_nodes.pop(leaf)  # 从未排序节点列表active_nodes中删除变量leaf_global
 
+            print("最终选择的leaf", leaf_global)
+            print("####################################")
 
         order.append(active_nodes[0])   # 将剩余的未排序节点加入到拓扑序列中，并将拓扑序列反转
         order.reverse()
@@ -178,7 +197,7 @@ class DiffAN():
                 jacobian_ = jacfwd(get_score_previous_leaves)(X).squeeze()  # 使用前向自动微分（jacfwd）函数，得到一个三维张量jacobian_，表示模型对已排序节点的预测分数的雅可比矩阵
                 if len(order) == 1:
                     jacobian_, score_previous_leaves = jacobian_.unsqueeze(0), score_previous_leaves.unsqueeze(0)
-                score_active += torch.einsum("i,ij -> j",score_previous_leaves/ jacobian_[:, order].diag(),jacobian_[:, active_nodes])#
+                score_active += torch.einsum("i,ij -> j", score_previous_leaves/jacobian_[:, order].diag(), jacobian_[:, active_nodes])  #
 
             return score_active
         return model_fn_functorch
@@ -187,21 +206,26 @@ class DiffAN():
         dropout_mask = torch.zeros_like(x).to(self.device)
         dropout_mask[:, active_nodes] = 1
         return (x * dropout_mask).float()
-    
+
+    # 雅可比矩阵是一个向量值函数的所有一阶偏导数的矩阵
     def compute_jacobian_and_get_leaf(self, data_loader, active_nodes, model_fn_functorch):
-        jacobian = []
-        for x_batch in data_loader:
-            x_batch_dropped = self.get_masked(x_batch, active_nodes) if self.masking else x_batch
-            jacobian_ = vmap(jacrev(model_fn_functorch))(x_batch_dropped.unsqueeze(1)).squeeze()
-            jacobian.append(jacobian_[...,active_nodes].detach().cpu().numpy())
-        jacobian = np.concatenate(jacobian, 0)
-        leaf = self.get_leaf(jacobian)
+        jacobian = []  # 初始化一个空列表jacobian，用来存储每个批次数据的雅可比矩阵
+        for x_batch in data_loader:  # 遍历数据加载器data_loader中的每个批次数据x_batch
+            x_batch_dropped = self.get_masked(x_batch, active_nodes) if self.masking else x_batch  # 对于每个批次数据，如果self.masking为真，就调用self.get_masked函数，用active_nodes作为掩码来过滤x_batch中的元素；否则，就直接使用x_batch。
+            jacobian_ = vmap(jacrev(model_fn_functorch))(x_batch_dropped.unsqueeze(1)).squeeze()  # 调用vmap和jacrev组合，传入model_fn_functorch作为参数，对x_batch_dropped进行向量化和反向雅可比矩阵计算。得到的结果jacobian_是一个四维张量，需要用squeeze方法去掉多余的维度。
+            jacobian.append(jacobian_[..., active_nodes].detach().cpu().numpy())
+        jacobian = np.concatenate(jacobian, 0)  # 用np.concatenate方法将jacobian列表中的所有数组沿着第0轴拼接起来，得到最终的雅可比矩阵jacobian。
+        leaf = self.get_leaf(jacobian)  # 调用self.get_leaf函数，传入jacobian作为参数，得到叶子节点leaf，并返回。
         return leaf
-    
+
+    # 用来从一个雅可比矩阵中获取叶子节点。
     def get_leaf(self, jacobian_active):
-        jacobian_var = jacobian_active.var(0)
+        jacobian_var = jacobian_active.var(0)  # 调用了numpy库2的var方法，传入0作为axis参数，表示沿着第0轴（行）计算每一列的方差。方差是一种衡量数据分散程度的统计量。将得到的结果赋值给jacobian_var，它是一个一维数组，表示每一列的方差。
         jacobian_var_diag = jacobian_var.diagonal()
         var_sorted_nodes = np.argsort(jacobian_var_diag)
+        np.set_printoptions(suppress=True, precision=3, linewidth=10000)  # 关闭print科学计数法
+        print("jacob_diag: ", jacobian_var_diag)
+        print("var_sorted_nodes: ", var_sorted_nodes)
         if self.sorting:
             return var_sorted_nodes
         leaf_current = var_sorted_nodes[0]

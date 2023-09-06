@@ -20,14 +20,15 @@ def main():
     # true_causal_matrix, X = dataset.B, dataset.X
 
     batch_size = 128
-    true_causal_matrix, X, n_nodes = dataset_transform("./datasets/25V_474N_Microwave")
+    DatasetName = "25V_474N_Microwave"
+    true_causal_matrix, X, n_nodes = dataset_transform(f"./datasets/{DatasetName}")
     X = X.astype(float)
     print(X.shape)
     print(X[:10])
 
     print(f"Run Causal Discovery with Deciduous Residue")
-    diffan = DiffAN(n_nodes, residue=True, batch_size=batch_size)
-    adj_matrix, order = diffan.fit(X)
+    diffan = DiffAN(n_nodes, residue=True, batch_size=batch_size, DatasetName=DatasetName)
+    adj_matrix, order = diffan.fit(X, use_savemodel="model_state_dict_epoch1221.pth")
     print(f"DiffANM Num errors {num_errors(order, true_causal_matrix)}")
     mt = MetricsDAG(adj_matrix, true_causal_matrix).metrics
     mt["sid"] = SID(true_causal_matrix, adj_matrix).item()
@@ -35,15 +36,15 @@ def main():
     MyPlotGraphDAG(adj_matrix, true_causal_matrix)
     print(f"order: {order}")
 
-    print(f"Run Causal Discovery without Deciduous Residue / Masking only")
-    diffan = DiffAN(n_nodes, residue=False, batch_size=batch_size)
-    adj_matrix, order = diffan.fit(X)
-    print(f"DiffANM Num errors {num_errors(order, true_causal_matrix)}")
-    mt = MetricsDAG(adj_matrix, true_causal_matrix).metrics
-    mt["sid"] = SID(true_causal_matrix, adj_matrix).item()
-    print(mt)
-    MyPlotGraphDAG(adj_matrix, true_causal_matrix)
-    print(f"order: {order}")
+    # print(f"Run Causal Discovery without Deciduous Residue / Masking only")
+    # diffan = DiffAN(n_nodes, residue=False, batch_size=batch_size, DatasetName=DatasetName)
+    # adj_matrix, order = diffan.fit(X)
+    # print(f"DiffANM Num errors {num_errors(order, true_causal_matrix)}")
+    # mt = MetricsDAG(adj_matrix, true_causal_matrix).metrics
+    # mt["sid"] = SID(true_causal_matrix, adj_matrix).item()
+    # print(mt)
+    # MyPlotGraphDAG(adj_matrix, true_causal_matrix)
+    # print(f"order: {order}")
 
 
 if __name__ == "__main__":
