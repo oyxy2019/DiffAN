@@ -51,7 +51,9 @@ class DiffAN():
         ## Pruning
         self.cutoff = 0.001
 
+        ## 加的
         self.DatasetName = DatasetName
+        self.custom = True
 
     def fit(self, X, use_savemodel=None):
         # X = (X - X.mean(0, keepdims = True)) / X.std(0, keepdims = True)    # 标准化处理
@@ -75,7 +77,7 @@ class DiffAN():
 
         # 加载跑过的模型，节约运行时间
         if(use_savemodel is not None):
-            print(f"using_savemodel:{use_savemodel}")
+            print(f"##### using_savemodel:{use_savemodel} #####")
             self.model.load_state_dict(torch.load(f'./save_model/{use_savemodel}'))
             return
 
@@ -143,41 +145,93 @@ class DiffAN():
         
         self.model.eval()
         order = []  # 表示拓扑序列
+        parallel_order = []  # 自定义并行拓扑序列
         active_nodes = list(range(self.n_nodes))    # 表示当前未排序的节点列表
         
         
         steps_list = [step] if step is not None else range(0, self.n_steps+1, self.n_steps//self.n_votes)   # 表示用来计算雅可比矩阵的时间步列表
+
         if self.sorting:
             steps_list = [self.n_steps//2]
         pbar = tqdm(range(self.n_nodes-1), desc="Nodes ordered ")
-        pbar = tqdm(range(self.n_nodes - 1), desc="Nodes ordered ", disable=True)
+        pbar = tqdm(range(self.n_nodes-1), desc="Nodes ordered ", disable=True)
         leaf = None
+
+        print("steps_list:")
+        for i, steps in enumerate(steps_list):
+            print(i, steps)
+        print("-------------")
+
         for jac_step in pbar:   # 使用一个循环来进行排序
             leaves = []
+            Normal_jacob_sum = []
             for i, steps in enumerate(steps_list):  # 使用一个内部循环来遍历时间步列表
                 data_loader = torch.utils.data.DataLoader(X, eval_batch_size, drop_last = True)  # 创建一个数据加载器，用来从图数据中按批次提取数据
 
                 model_fn_functorch = self.get_model_function_with_residue(steps, active_nodes, order)   # 调用一个函数，用来获取模型在给定时间步和未排序节点上的输出函数
                 leaf_ = self.compute_jacobian_and_get_leaf(data_loader, active_nodes, model_fn_functorch)   # 调用另一个函数，用来计算输出函数的雅可比矩阵，并从中选择一个叶子节点（没有后继节点的节点）
+                if self.custom:
+                    Normal_jacob_sum.append(leaf_)  # 这里return的leaf_实际上是归一化后的雅可比对角值
+
                 if self.sorting:
                     order = leaf_.tolist()
                     order.reverse()
                     return order
                 leaves.append(leaf_)    # 将叶子节点加入到一个列表leaves中
 
-            leaves_count = []
-            for leave in leaves:
-                leaves_count.append(active_nodes[leave])
-            print("出现次数global_leaves: ", leaves_count)
+            if self.custom:
+                Normal_jacob_sum = np.sum(Normal_jacob_sum, axis=0)
+                sorted_nodes = np.argsort(Normal_jacob_sum)
+                print("----------------")
+                print("jacob_score", Normal_jacob_sum[sorted_nodes])
+                print("local_node", sorted_nodes)
+                print("----------------")
+
+                '''
+                改进思路：如果叶节点的分数相差不大就认为是并列的叶节点，应该一起用中括号括起来
+                关键点：如何动态设定这个阈值呢？
+                '''
+                level = []
+                first_leaf = sorted_nodes[0]
+                # leaf_global = active_nodes[leaf]
+                level.append(active_nodes[first_leaf])
+                active_nodes.pop(first_leaf)
+
+                # if len(sorted_nodes) > 1:
+                #     # 增加并列的叶节点
+                #     for i in range(1, len(sorted_nodes)):
+                #         second_leaf = sorted_nodes[i]
+                #         var = Normal_jacob_sum[second_leaf]
+                #         level.append(active_nodes[second_leaf])
 
 
-            leaf = Counter(leaves).most_common(1)[0][0]  # 从列表leaves中找出出现次数最多的叶子节点
-            leaf_global = active_nodes[leaf]    # 将其对应的全局节点编号赋值给变量leaf_global
-            order.append(leaf_global)   # 将变量leaf_global加入到拓扑序列order中
-            active_nodes.pop(leaf)  # 从未排序节点列表active_nodes中删除变量leaf_global
 
-            print("最终选择的leaf", leaf_global)
-            print("####################################")
+
+                parallel_order.append(level)
+                if len(active_nodes) == 0:
+                    break
+
+            else:
+                leaves_count = []
+                for leave in leaves:
+                    leaves_count.append(active_nodes[leave])
+                print("出现次数global_leaves: ", leaves_count)
+
+
+                leaf = Counter(leaves).most_common(1)[0][0]  # 从列表leaves中找出出现次数最多的叶子节点
+                leaf_global = active_nodes[leaf]    # 将其对应的全局节点编号赋值给变量leaf_global
+                order.append(leaf_global)   # 将变量leaf_global加入到拓扑序列order中
+                active_nodes.pop(leaf)  # 从未排序节点列表active_nodes中删除变量leaf_global
+                print("剩余节点: ", active_nodes)
+                print("最终选择的leaf", leaf_global)
+                print("####################################")
+
+        if self.custom:
+            if len(active_nodes) > 0:
+                parallel_order.append(active_nodes)
+            parallel_order.reverse()
+            print("parallel_order: ", parallel_order)
+            return parallel_order
 
         order.append(active_nodes[0])   # 将剩余的未排序节点加入到拓扑序列中，并将拓扑序列反转
         order.reverse()
@@ -223,9 +277,14 @@ class DiffAN():
         jacobian_var = jacobian_active.var(0)  # 调用了numpy库2的var方法，传入0作为axis参数，表示沿着第0轴（行）计算每一列的方差。方差是一种衡量数据分散程度的统计量。将得到的结果赋值给jacobian_var，它是一个一维数组，表示每一列的方差。
         jacobian_var_diag = jacobian_var.diagonal()
         var_sorted_nodes = np.argsort(jacobian_var_diag)
-        np.set_printoptions(suppress=True, precision=3, linewidth=10000)  # 关闭print科学计数法
-        print("jacob_diag: ", jacobian_var_diag)
-        print("var_sorted_nodes: ", var_sorted_nodes)
+        sorted_jacob = jacobian_var_diag[var_sorted_nodes]
+        if self.custom:
+            np.set_printoptions(suppress=True, precision=6, linewidth=10000)  # 关闭print科学计数法
+            Normal_jacob = jacobian_var_diag/np.sum(jacobian_var_diag)  # 归一化
+            # print("Sorted_jacob: ", sorted_jacob)
+            # print("Normal_jacob: ", Normal_jacob)
+            # print("var_sorted_nodes: ", var_sorted_nodes)
+            return Normal_jacob
         if self.sorting:
             return var_sorted_nodes
         leaf_current = var_sorted_nodes[0]

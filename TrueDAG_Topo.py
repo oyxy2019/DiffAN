@@ -71,7 +71,7 @@ for i in range(len(adjacency_matrix)):
             graph[i].append(j)
 
 topo_sequence = topoSort(graph)
-# print(topo_sequence)
+print("topo_sequence: ", topo_sequence)
 formatted_sequence = []
 ans_matrix = np.zeros_like(adjacency_matrix)
 # print(ans_matrix)
