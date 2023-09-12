@@ -29,7 +29,7 @@ def main():
     print(f"Run Causal Discovery with Deciduous Residue")
     diffan = DiffAN(n_nodes, residue=True, batch_size=batch_size, DatasetName=DatasetName)
     adj_matrix, order = diffan.fit(X, use_savemodel="model_state_dict_epoch1221.pth")
-    print(f"DiffANM Num errors {num_errors(order, true_causal_matrix)}")
+    # print(f"DiffANM Num errors {num_errors(order, true_causal_matrix)}")
     mt = MetricsDAG(adj_matrix, true_causal_matrix).metrics
     mt["sid"] = SID(true_causal_matrix, adj_matrix).item()
     print(mt)

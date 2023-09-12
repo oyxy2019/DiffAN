@@ -15,7 +15,7 @@ from diffan.utils import full_DAG
 
 
 class DiffAN():
-    def __init__(self, n_nodes, masking = True, residue= True, 
+    def __init__(self, n_nodes, masking = True, residue= True,
                 epochs: int = int(3e3), batch_size : int = 1024, learning_rate : float = 0.001, DatasetName = None):
         self.n_nodes = n_nodes
         assert self.n_nodes > 1, "Not enough nodes, make sure the dataset contain at least 2 variables (columns)."
@@ -24,8 +24,8 @@ class DiffAN():
         ## Diffusion parameters
         self.n_steps = int(1e2)
         betas = get_named_beta_schedule(schedule_name = "linear", num_diffusion_timesteps = self.n_steps, scale = 1, beta_start = 0.0001, beta_end = 0.02)
-        self.gaussian_diffusion = GaussianDiffusion(betas = betas, 
-                                                    loss_type = LossType.MSE, 
+        self.gaussian_diffusion = GaussianDiffusion(betas = betas,
+                                                    loss_type = LossType.MSE,
                                                     model_mean_type= ModelMeanType.EPSILON,  # START_X,EPSILON
                                                     model_var_type=ModelVarType.FIXED_LARGE,
                                                     rescale_timesteps = True,
@@ -33,7 +33,7 @@ class DiffAN():
         self.schedule_sampler = UniformSampler(self.gaussian_diffusion)
 
         ## Diffusion training
-        self.epochs = epochs 
+        self.epochs = epochs
         self.batch_size = batch_size
         self.model = DiffMLP(n_nodes).to(self.device)
         self.model.float()
@@ -64,9 +64,37 @@ class DiffAN():
         return out_dag, order
 
     def pruning(self, order, X):
-        return full_DAG(order)
+        print("_________DAG__________")
+
+        def full_DAG_1(topo_sequence):  # 根据parallel_order得出邻接矩阵
+            ans_matrix = np.zeros((self.n_nodes, self.n_nodes))
+            for i in range(0, len(topo_sequence) - 1):
+                sub_lst = topo_sequence[i]
+                # print(sub_lst)
+                for node1 in sub_lst:
+                    for j in range(i + 1, len(topo_sequence)):
+                        for node2 in topo_sequence[j]:
+                            # print(f"node1:{node1} node2:{node2}")
+                            ans_matrix[node1][node2] = 1
+            print(f"ans_matrix:\n{ans_matrix}")
+            return ans_matrix
+
+        def full_DAG_2(topo_sequence):      # 隔代节点不相连
+            ans_matrix = np.zeros((self.n_nodes, self.n_nodes))
+            for i in range(0, len(topo_sequence) - 1):
+                sub_lst = topo_sequence[i]
+                # print(sub_lst)
+                for node1 in sub_lst:
+                    for node2 in topo_sequence[i + 1]:
+                        # print(f"node1:{node1} node2:{node2}")
+                        ans_matrix[node1][node2] = 1
+            print(f"ans_matrix:\n{ans_matrix}")
+            return ans_matrix
+
+        return full_DAG_1(order)
+        # return full_DAG(order)
         # return cam_pruning(full_DAG(order), X, self.cutoff)
-    
+
     def train_score(self, X, fixed=None, use_savemodel=None):
         if fixed is not None:
             self.epochs = fixed
@@ -124,7 +152,7 @@ class DiffAN():
                             best_model_state = deepcopy(self.model.state_dict())
                             best_model_state_epoch = epoch
                     pbar.set_postfix({'Epoch Loss': epoch_val_loss})
-                
+
                 if epoch - best_model_state_epoch > self.early_stopping_wait: # Early stopping
                     break
         if fixed is None:   # 打印提前停止训练时的轮数
@@ -136,19 +164,19 @@ class DiffAN():
 
     # 对一个有向无环图（DAG）进行拓扑排序
     def topological_ordering(self, X, step = None, eval_batch_size = None):
-        
+
         if eval_batch_size is None:
             eval_batch_size = self.batch_size   # 表示每个批次的数据量
         eval_batch_size = min(eval_batch_size, X.shape[0])
 
         X = X[:self.batch_size]
-        
+
         self.model.eval()
         order = []  # 表示拓扑序列
         parallel_order = []  # 自定义并行拓扑序列
         active_nodes = list(range(self.n_nodes))    # 表示当前未排序的节点列表
-        
-        
+
+
         steps_list = [step] if step is not None else range(0, self.n_steps+1, self.n_steps//self.n_votes)   # 表示用来计算雅可比矩阵的时间步列表
 
         if self.sorting:
@@ -157,10 +185,10 @@ class DiffAN():
         pbar = tqdm(range(self.n_nodes-1), desc="Nodes ordered ", disable=True)
         leaf = None
 
-        print("steps_list:")
-        for i, steps in enumerate(steps_list):
-            print(i, steps)
-        print("-------------")
+        # print("steps_list:")
+        # for i, steps in enumerate(steps_list):
+        #     print(i, steps)
+        # print("-------------")
 
         for jac_step in pbar:   # 使用一个循环来进行排序
             leaves = []
@@ -185,7 +213,7 @@ class DiffAN():
                 print("----------------")
                 print("jacob_score", Normal_jacob_sum[sorted_nodes])
                 print("local_node", sorted_nodes)
-                print("----------------")
+
 
                 '''
                 改进思路：如果叶节点的分数相差不大就认为是并列的叶节点，应该一起用中括号括起来
@@ -195,20 +223,30 @@ class DiffAN():
                 first_leaf = sorted_nodes[0]
                 # leaf_global = active_nodes[leaf]
                 level.append(active_nodes[first_leaf])
-                active_nodes.pop(first_leaf)
-
-                # if len(sorted_nodes) > 1:
-                #     # 增加并列的叶节点
-                #     for i in range(1, len(sorted_nodes)):
-                #         second_leaf = sorted_nodes[i]
-                #         var = Normal_jacob_sum[second_leaf]
-                #         level.append(active_nodes[second_leaf])
+                pop_nodes = [first_leaf]
 
 
+                if len(sorted_nodes) > 1:
+                    # 增加并列的叶节点
+                    first_leaf_percent = Normal_jacob_sum[first_leaf]/Normal_jacob_sum.sum()
+                    print("first_leaf_percent: ", first_leaf_percent)
 
+                    for i in range(1, len(sorted_nodes)):
+                        second_leaf = sorted_nodes[i]
+                        second_leaf_percent = Normal_jacob_sum[second_leaf]/Normal_jacob_sum.sum()
+                        print("second_leaf_percent: ", second_leaf_percent)
+                        print(second_leaf)
+                        if second_leaf_percent - first_leaf_percent <= 0.01:     # 0.01是百分比阈值，后面可以想想别的动态的方法
+                            level.append(active_nodes[second_leaf])
+                            pop_nodes.append(second_leaf)
+
+                print("active_nodes ", active_nodes)
+                print("pop_nodes ", pop_nodes)
+                active_nodes = [active_nodes[i] for i in range(len(active_nodes)) if i not in pop_nodes]
+                print("active_nodes ", active_nodes)
 
                 parallel_order.append(level)
-                if len(active_nodes) == 0:
+                if len(active_nodes) <= 1:
                     break
 
             else:
