@@ -77,7 +77,6 @@ def dataset_transform(data_path=r"/home/newsgrid/linyy/gflowcausal/datasets/25V_
     ## 设备拓扑图
     # topo_path = f"{data_path}/Topology.npy"
     # topo_matrix = np.load(topo_path)
-    # topo_matrix = np.load(topo_path)
     # topo_matrix[:, :] = 0  # 暂不考虑设备拓扑
     print(f"Load data done, columns: {alarm_data.columns.values}, shape: {alarm_data.shape}")
     print(alarm_data[:10])
